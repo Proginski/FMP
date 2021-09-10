@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 setwd("C:/Users/Snoopybreton/Desktop/BIM/Archaea data")
 #setwd("C:/Users/Snoopybreton/Desktop/BIM/Archaea")
 ```
+The user is encouraged to use ctr+shift+F4 on Rstudio to benefit from the visual editor.
 
 # Setup
 
