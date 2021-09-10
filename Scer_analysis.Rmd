@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 ```
-
+The user is encouraged to use ctr+shift+F4 on Rstudio to benefit from the visual editor.
 # Deviation score VS Abundance plot
 
 ## By codon
