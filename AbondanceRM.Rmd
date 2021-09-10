@@ -1,0 +1,1324 @@
+---
+title: "Levure"
+author: "Paul Roginski"
+date: "28/06/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+# Deviation score VS Abundance plot
+
+## By codon
+
+```{r}
+deviationScoreVSabundanceByCodon <- function(givenCodon, abundance_file){
+  
+Set <- "Abondance/Scer_Intergenic.nfasta"
+library(coRdon)
+set_ref <- readSet(file = Set)
+codon_Table_ref <- codonTable(set_ref)
+codon_Counts_ref <- codonCounts(codon_Table_ref)
+
+
+givenCodon_meanfreq <- sum(codon_Counts_ref[ ,givenCodon])/sum(codon_Counts_ref)
+
+Set_test <- "Abondance/Scer_CDS.nfasta"
+library(coRdon)
+set_test <- readSet(file = Set_test)
+codon_Table_test <- codonTable(set_test)
+codon_Counts_test <- codonCounts(codon_Table_test)
+
+if(length(givenCodon) > 1){
+  givenCodon_seqfreq <- rowSums(codon_Counts_test[ ,givenCodon])/rowSums(codon_Counts_test)
+}else{
+  givenCodon_seqfreq <- codon_Counts_test[ ,givenCodon]/rowSums(codon_Counts_test)
+}
+
+dev_score <- data.frame(geneSeq = codon_Table_test@ID, devScore = givenCodon_seqfreq - givenCodon_meanfreq)
+
+  
+  ################# Abundance #################
+  # Create abundance table
+  abundance_table <- read.table(abundance_file, sep = "\t")
+  colnames(abundance_table) <- c("geneSeq", "abundance")
+  # Use log scale for abundance values
+  abundance_table$abundance <- log10(abundance_table$abundance)
+  
+  # Remove - Inf values
+  if (length(grep(-Inf, abundance_table$abundance)) != 0){
+    abundance_table <- abundance_table[-grep(-Inf, abundance_table$abundance), ]
+  }
+
+  # Remove left outliers
+  abundance_table <- abundance_table[abundance_table$abundance > quantile(abundance_table$abundance, probs = c(0.05)), ]
+    
+
+  ################# Plot #################
+  scoreNabundance_table <- merge(dev_score, abundance_table, 
+                                by="geneSeq",all = F)
+  
+  rownames(scoreNabundance_table) <- scoreNabundance_table$Row.names
+  scoreNabundance_table <- scoreNabundance_table[ ,-1]
+  colnames(scoreNabundance_table) <- c("devScore", "abundance")
+  
+  
+  library(ggplot2)
+  library(ggpubr)
+
+  title <- paste(givenCodon, collapse = " ")
+  print(title)
+  
+  p <- ggplot(scoreNabundance_table, aes(x=abundance, y=devScore))+
+    geom_point()+
+    ggtitle(title)+
+    geom_hline(yintercept = 0)+
+    geom_smooth(method=lm)+
+    stat_cor(method = "spearman", 
+             label.x = 0.2, label.y = 0.3)+
+    ylim(c(-0.05,0.3))
+  
+  print(p)
+  
+  
+  return(dev_score) 
+}
+```
+
+```{r}
+pdf("GXX codons devscore vs abundance .pdf")
+
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GTT","GTC","GTA","GTG"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GCT","GCC","GCA","GCG"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GAT","GAC"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GAA","GAG"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GAT","GAC","GAA","GAG"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GGT","GGC","GGA","GGG"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+deviationScoreVSabundanceByCodon(givenCodon = c("GTT","GTC","GTA","GTG",
+            "GCT","GCC","GCA","GCG",
+            "GGT","GGC","GGA","GGG"),
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+
+for (i in c("GTT","GTC","GTA","GTG",
+            "GCT","GCC","GCA","GCG",
+            "GAT","GAC", "GAA","GAG", 
+            "GGT","GGC","GGA","GGG")){
+
+  deviationScoreVSabundanceByCodon(givenCodon = i,
+                                 abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+  
+}
+
+
+dev.off()
+
+
+# for (i in c(c("GAA","GAG"),
+#             c("GAT","GAC"),
+#             c("GTT","GTC","GTA","GTG"),
+#             c("GCT","GCC","GCA","GCG"),
+#             c("GGT","GGC","GGA","GGG"),
+#             c("GAA","GAG",
+#             "GAT","GAC",
+#             "GTT","GTC","GTA","GTG",
+#             "GCT","GCC","GCA","GCG",
+#             "GGT","GGC","GGA","GGG"),
+#             "GAA","GAG",
+#             "GAT","GAC",
+#             "GTT","GTC","GTA","GTG",
+#             "GCT","GCC","GCA","GCG",
+#             "GGT","GGC","GGA","GGG")){
+# 
+#   deviationScoreVSabundanceByCodon(givenCodon = i,
+#                                  abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+# }
+```
+
+```{r}
+# Return the mean frequency of a given reference set of nucleotidic sequences
+getReferenceFreq <- function(referenceSet,
+                             by){
+  
+  # Absolute frequency for each of the 64 codons for each nucleotide sequence
+  library(coRdon)
+  set_ref <- readSet(file = referenceSet)
+  codon_Table_ref <- codonTable(set_ref)
+  codon_Counts_ref <- codonCounts(codon_Table_ref)
+
+  
+  if(by == "same_position"){
+    # Transform codon_Counts to a table so that for position 1 of the codon it displays the proportion of A T C and G.
+    
+    library(stringr)
+    meanBasesFractions_ref <- c()
+    
+    for(pos in c(1,2,3)){
+      for(base in c("A","C","G","T")){
+        
+        codon_givenBase_givenPosition_ref <- substring(colnames(codon_Counts_ref),pos,pos) == base
+        sum_givenBase_givenPosition_ref <- sum(codon_Counts_ref[,codon_givenBase_givenPosition_ref])
+        
+        relFreqBasePos_ref <- sum_givenBase_givenPosition_ref/sum(codon_Counts_ref)
+        meanBasesFractions_ref <- c(meanBasesFractions_ref,relFreqBasePos_ref)
+      }
+    }
+     names(meanBasesFractions_ref) <- c("A1","C1","G1","T1",
+              "A2","C2","G2","T2",
+              "A3","C3","G3","T3")
+  }
+  
+  
+  if(by == "same_base"){
+    # Transform codon_Counts to a table so that for the A base it displays its fraction in firstn second and third position of the codon.
+    library(stringr)
+    # Mean fraction of each base among the 3 codon position
+    meanBasesFractions_ref <- c()
+    
+    for (base in c("A","C","G","T")){
+      for (pos in c(1,2,3)){
+        codons_givenBase_ref <- str_count(colnames(codon_Counts_ref), base)
+        all_givenBase_ref <- sum(t(t(codon_Counts_ref)*codons_givenBase_ref))
+        
+        codon_givenBase_givenPosition_ref <- substring(colnames(codon_Counts_ref),pos,pos) == base
+        sum_givenBase_givenPosition_ref <- sum(codon_Counts_ref[,codon_givenBase_givenPosition_ref])
+        
+        relFreqBasePos_ref <- sum_givenBase_givenPosition_ref/all_givenBase_ref
+        
+        meanBasesFractions_ref <- c(meanBasesFractions_ref,relFreqBasePos_ref)
+      }
+    }
+    names(meanBasesFractions_ref) <- c("A1","A2","A3",
+              "C1","C2","C3",
+              "G1","G2","G3",
+              "T1","T2","T3")
+  }
+  
+  return(meanBasesFractions_ref)
+  
+}
+```
+
+```{r}
+baseNpos_function <- function(referenceSet,
+                              testSet,
+                              by,
+                              base,
+                              pos,
+                              title = "Deviation score vs abundance",
+                              lengthCorrection = F, 
+                              dropOutliers = F,
+                              abundance_file){
+  
+  # Absolute frequency for each of the 64 codons for each nucleotide sequence
+  library(coRdon)
+  set_test <- readSet(file = testSet)
+  codon_Table_test <- codonTable(set_test)
+  codon_Counts_test <- codonCounts(codon_Table_test)
+  
+  # Retrieve the gene's name (name of the sequence)
+  library(stringr)
+  content <- readLines(testSet)
+  headers_id <- grep(">", content)
+  headers <- content[headers_id]
+  headers <- gsub(">","",headers)
+
+  # number of codons (occurences) with a given base at a given position
+  nb_cod_givenBase_givenPos <- rowSums(codon_Counts_test[ ,colnames(codon_Counts_test)[substring(colnames(codon_Counts_test),pos,pos) == base]])
+  
+  
+  if(by == "same_position"){
+    seqfreqbase <- nb_cod_givenBase_givenPos/rowSums(codon_Counts_test)
+  }
+  
+  if(by == "same_base"){
+    codons_givenBase_test <- str_count(colnames(codon_Counts_test), base)
+    all_givenBase_test <- colSums(t(codon_Counts_test)*codons_givenBase_test)
+ 
+    seqfreqbase <- nb_cod_givenBase_givenPos/all_givenBase_test
+  }
+  
+
+  # Allows to input a file that will be processed by the getReferenceFreq function, or more commonly a output of getReferenceFreq
+  if(grepl("MBF", class(referenceSet), fixed = TRUE)){
+    if(
+      (class(referenceSet) == "MBF_same_position" & by == "same_position") | 
+      (class(referenceSet) == "MBF_same_base" & by == "same_base")){
+          meanBasesFractions_ref <- referenceSet
+    } else{ return(print("The referenceSet and the testSet do not match (one by same_position, the other by same_base."))}
+  }
+  else{
+    meanBasesFractions_ref <- getReferenceFreq(referenceSet,by)
+  }
+  
+  
+  meanfreqbase <- meanBasesFractions_ref[paste(base,pos, sep="")]
+  
+  dev_score <- seqfreqbase - meanfreqbase
+  
+  dev_score <- data.frame(geneSeq = headers, devScore = dev_score)
+  
+  
+  # Multiplies each deviation score by the length of the sequence
+  if(lengthCorrection){
+    dev_score$devScore <- dev_score$devScore*seqLengths$seqLengths
+  }
+
+  
+  if(dropOutliers){
+    dev_score <- dev_score[dev_score$devScore > quantile(dev_score$devScore, c(0.01)) & dev_score$devScore < quantile(dev_score$devScore, c(0.99)), ]
+  }
+  
+
+  
+  ################# Abundance #################
+  # Create abundance table
+  abundance_table <- read.table(abundance_file, sep = "\t")
+  colnames(abundance_table) <- c("geneSeq", "abundance")
+  # Use log scale for abundance values
+  abundance_table$abundance <- log10(abundance_table$abundance)
+  
+  # Remove - Inf values
+  if (length(grep(-Inf, abundance_table$abundance)) != 0){
+    abundance_table <- abundance_table[-grep(-Inf, abundance_table$abundance), ]
+  }
+
+  # Remove left outliers
+  abundance_table <- abundance_table[abundance_table$abundance > quantile(abundance_table$abundance, probs = c(0.05)), ]
+    
+
+  ################# Plot #################
+  scoreNabundance_table <- merge(dev_score, abundance_table, 
+                                by="geneSeq",all = F)
+  
+  rownames(scoreNabundance_table) <- scoreNabundance_table$Row.names
+  scoreNabundance_table <- scoreNabundance_table[ ,-1]
+  colnames(scoreNabundance_table) <- c("devScore", "abundance")
+  
+  
+  library(ggplot2)
+  library(ggpubr)
+
+  p <- ggplot(scoreNabundance_table, aes(x=abundance, y=devScore))+
+    geom_point()+
+    ggtitle(title)+
+    geom_hline(yintercept = 0)+
+    geom_smooth(method=lm)+
+    stat_cor(method = "spearman", 
+             label.x = 0.2, label.y = 0.7)#+
+    # geom_label(
+    #   label= paste("y = ", 
+    #                round(lm(formula = devScore~abundance, data = scoreNabundance_table)$coefficients[2], 
+    #                      digits = 2),
+    #                "x + ",
+    #                round(lm(formula = devScore~abundance, data = scoreNabundance_table)$coefficients[1],
+    #                      digits = 2), 
+    #                sep = ""),
+    #   x=0.2,
+    #   y=0.65, 
+    #   hjust=0,
+    #   # Rectangle size around label
+    #   label.size = 0.35,
+    #   color = "green")
+    
+  
+  print(p)
+  
+  
+  return(dev_score)
+}
+```
+
+```{r}
+referenceSet_IGORF_same_position <- getReferenceFreq("Abondance/Scer_Intergenic.nfasta", by = "same_position")
+
+referenceSet_IGORF_same_base <- getReferenceFreq("Abondance/Scer_Intergenic.nfasta", by = "same_base")
+```
+
+```{r}
+
+test <- baseNpos_function(referenceSet = referenceSet_IGORF_same_base,
+                          testSet = "Abondance/Scer_CDS.nfasta", 
+                    by = "same_position", 
+                    base = "G",
+                    pos = 1,
+                    title = "G1",
+                    abundance_file = "Abondance/")
+```
+
+## Same position
+
+```{r}
+# PDF output
+pdf(file = paste("FROM-IGORF deviation scores of protein vs abundance by same base",".pdf"))
+
+for (base in c("A","C","G","T")) {
+  for (pos in 1:3){
+    baseNpos_function(referenceSet = referenceSet_IGORF_same_position,
+                    "Abondance/Scer_CDS.nfasta", 
+                    by = "same_position", 
+                    base = base,
+                    pos = pos,
+                    title = paste(base, pos, sep = ""),
+                    abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+  }
+}
+
+dev.off()
+```
+
+## Same base
+
+```{r}
+# PDF output
+pdf(file = paste("FROM-IGORF deviation scores of protein vs abundance by same base",".pdf"))
+
+for (base in c("A","C","G","T")) {
+  for (pos in 1:3){
+    baseNpos_function(referenceSet = referenceSet_IGORF_same_base,
+                    "Abondance/Scer_CDS.nfasta", 
+                    by = "same_base", 
+                    base = base,
+                    pos = pos,
+                    title = paste(base, pos, sep = ""),
+                    abundance_file = "Abondance/4932-WHOLE_ORGANISM-integrated.tab")
+  }
+}
+
+dev.off()
+```
+
+# GC content
+
+```{r}
+
+testSet <- "Abondance/Scer_Intergenic.nfasta"
+# Absolute frequency for each of the 64 codons for each nucleotide sequence
+  library(coRdon)
+  set_test <- readSet(file = testSet)
+  codon_Table_test <- codonTable(set_test)
+  codon_Counts_test <- codonCounts(codon_Table_test)
+  sum(codon_Counts_test[1,])
+  
+# Number of C or G by codon
+library(stringr)
+codons_GCcontent <- str_count(colnames(codon_Counts_test), "C|G")
+# Number of C or G by sequence
+seq_GCnb <- rowSums(t(t(codon_Counts_test)*codons_GCcontent))
+# Sequences length
+seq_length <- codon_Table_test@len*3
+# GC content by sequence
+seq_GCcontent <- seq_GCnb/seq_length
+
+# Mean GC content
+seq_meanGC <- mean(seq_GCcontent) # 0.4026
+codon_meanGC <- sum(seq_GCnb)/sum(seq_length) # 0.3965
+
+pdf("Histogram of seq_GCcontent.pdf")
+hist(seq_GCcontent)
+dev.off()
+```
+
+```{r}
+title <- "sequences GC content vs abundance"
+GC_content_df <- data.frame(seq = codon_Table_test@ID, GC = seq_GCcontent)
+abundance_file <- "Abondance/4932-WHOLE_ORGANISM-integrated.tab"
+
+# Create abundance table
+  abundance_table <- read.table(abundance_file, sep = "\t")
+  colnames(abundance_table) <- c("seq", "abundance")
+  # Use log scale for abundance values
+  abundance_table$abundance <- log10(abundance_table$abundance)
+  
+  # Remove - Inf values
+  if (length(grep(-Inf, abundance_table$abundance)) != 0){
+    abundance_table <- abundance_table[-grep(-Inf, abundance_table$abundance), ]
+  }
+
+  # Remove left outliers
+  abundance_table <- abundance_table[abundance_table$abundance > quantile(abundance_table$abundance, probs = c(0.05)), ]
+    
+
+  ################# Plot #################
+  GCNabundance_table <- merge(GC_content_df, abundance_table, 
+                                by="seq",all = F)
+  
+  rownames(GCNabundance_table) <- GCNabundance_table$Row.names
+  GCNabundance_table <- GCNabundance_table[ ,-1]
+  colnames(GCNabundance_table) <- c("GC", "abundance")
+  
+  
+  library(ggplot2)
+  library(ggpubr)
+
+  p <- ggplot(GCNabundance_table, aes(x=abundance, y=GC))+
+    geom_point()+
+    ggtitle(title)+
+    geom_smooth(method=lm)+
+    stat_cor(method = "spearman", 
+             label.x = 0.2, label.y = 0.7)
+  
+  p
+```
+
+# Boxplot CDS vs IGORF for each base and position
+
+## GetSeqFreq
+
+```{r}
+# Return the mean frequency of a given reference set of nucleotidic sequences
+getSeqFreq <- function(Set, by){
+  
+  # Absolute frequency for each of the 64 codons for each nucleotide sequence
+  library(coRdon)
+  set_ref <- readSet(file = Set)
+  codon_Table_ref <- codonTable(set_ref)
+  codon_Counts_ref <- codonCounts(codon_Table_ref)
+
+  
+  if(by == "same_position"){
+    # Transform codon_Counts to a table so that for position 1 of the codon it displays the proportion of A T C and G.
+    
+    library(stringr)
+      meanBasesFractions_ref <- data.frame(A1=rep(as.double(NA),dim( codon_Counts_ref)[1]),C1=rep(as.double(NA),dim( codon_Counts_ref)[1]),G1=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              T1=rep(as.double(NA),dim( codon_Counts_ref)[1]),A2=rep(as.double(NA),dim( codon_Counts_ref)[1]),C2=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              G2=rep(as.double(NA),dim( codon_Counts_ref)[1]),T2=rep(as.double(NA),dim( codon_Counts_ref)[1]),A3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              C3=rep(as.double(NA),dim( codon_Counts_ref)[1]),G3=rep(as.double(NA),dim( codon_Counts_ref)[1]),T3=rep(as.double(NA),dim( codon_Counts_ref)[1]))
+
+    
+    for(pos in c(1,2,3)){
+      for(base in c("A","C","G","T")){
+        
+        codon_givenBase_givenPosition_ref <- substring(colnames(codon_Counts_ref),pos,pos) == base
+
+ 
+          sum_givenBase_givenPosition_ref <- rowSums(t(t(codon_Counts_ref)*codon_givenBase_givenPosition_ref))
+          relFreqBasePos_ref <- sum_givenBase_givenPosition_ref/codon_Table_ref@len
+          
+          meanBasesFractions_ref[,paste(base,pos, sep="")] <- relFreqBasePos_ref
+        
+  
+      }
+    }
+     names(meanBasesFractions_ref) <- c("1A","1C","1G","1T",
+              "2A","2C","2G","2T",
+              "3A","3C","3G","3T")
+
+  }
+  
+  
+  
+
+  if(by == "same_base"){
+    # Transform codon_Counts to a table so that for the A base it displays its fraction in firstn second and third position of the codon.
+    library(stringr)
+    # Mean fraction of each base among the 3 codon position
+      meanBasesFractions_ref <- data.frame(A1=rep(as.double(NA),dim( codon_Counts_ref)[1]),A2=rep(as.double(NA),dim( codon_Counts_ref)[1]),A3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              C1=rep(as.double(NA),dim( codon_Counts_ref)[1]),C2=rep(as.double(NA),dim( codon_Counts_ref)[1]),C3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              G1=rep(as.double(NA),dim( codon_Counts_ref)[1]),G2=rep(as.double(NA),dim( codon_Counts_ref)[1]),G3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              T1=rep(as.double(NA),dim( codon_Counts_ref)[1]),T2=rep(as.double(NA),dim( codon_Counts_ref)[1]),T3=rep(as.double(NA),dim( codon_Counts_ref)[1]))
+
+    
+    
+    for (base in c("A","C","G","T")){
+      for (pos in c(1,2,3)){
+        codons_givenBase_ref <- str_count(colnames(codon_Counts_ref), base)
+
+        codon_givenBase_givenPosition_ref <- substring(colnames(codon_Counts_ref),pos,pos) == base
+        
+          
+          sum_givenBase_givenPosition_ref <- rowSums(t(t(codon_Counts_ref)*codon_givenBase_givenPosition_ref))
+        
+          all_givenBase_ref <- rowSums(t(t(codon_Counts_ref)*codons_givenBase_ref))
+          
+          relFreqBasePos_ref <- sum_givenBase_givenPosition_ref/all_givenBase_ref
+          meanBasesFractions_ref[,paste(base,pos, sep="")] <- relFreqBasePos_ref
+        
+      }
+    }
+  }
+  
+  return(meanBasesFractions_ref)
+  
+}
+```
+
+## Versus function
+
+```{r}
+versusBoxplot <- function(fasta1, 
+                          fasta2, 
+                          by="", 
+                          lb1 = 1, 
+                          lb2 = 2, 
+                          color1 = "darkorange1", 
+                          color2 = "darkorchid1", 
+                          comment ="", 
+                          countFunction = "codon_count",
+                          title = "",
+                          ytop = 0){
+  
+  if (countFunction == "codon_count"){
+    df1 <- getSeqFreq(fasta1, by)
+    df2 <- getSeqFreq(fasta2, by)
+  }
+  else {
+    if (countFunction == "NNX"){
+      df1 <- get_NNX_Freq(fasta1)
+      df2 <- get_NNX_Freq(fasta2)
+    } else { return(print("Unkown countFunction")) }
+  } 
+  
+  lb1 <- paste(comment," ",lb1,sep="")
+  lb2 <- paste(comment," ",lb2,sep="")
+  
+  df1$lb <- lb1 
+  df2$lb <- lb2
+  
+  df <- rbind(df1, df2)
+  
+  if (countFunction == "codon_count"){
+    
+    if (by == "same_position"){
+      df <- df[ ,c("1A","1C","1G","1T",
+              "2A","2C","2G","2T",
+              "3A","3C","3G","3T","lb")]
+    }
+    
+    if (by == "same_base"){
+      df <- df[ ,c("A1","A2","A3",
+                "C1","C2","C3",
+                "G1","G2","G3",
+                "T1","T2","T3","lb")]
+    }
+  }
+  
+  
+  library(reshape2)
+  df <- melt(df)
+  
+  
+  if(ytop == 0){
+    ytop <- max(df$value)
+  }
+  
+  print(levels(df$lb))
+  
+  if(title == ""){
+    title <- paste(lb1,"vs",lb2,"by",by, comment)
+  }
+  
+  library(ggplot2)
+  p <- ggplot(data = df, aes(x=variable, y=value))+ 
+    geom_boxplot(aes(fill=lb))+
+    # scale_fill_manual(values=c(color1, color2), breaks = c(lb1, lb2))+
+    ggtitle(title)+
+    ylim(0,ytop)+
+    xlab("")+ylab("relative frequency")+
+    labs(fill = "Sequence type")+
+    scale_fill_grey(start = 0.5, end = 0.9)+
+    theme_minimal()+
+    theme(legend.position="bottom")
+    
+  
+  print(p)
+  
+  return(df)
+}
+```
+
+```{r}
+# versusBoxplot2 <- function(fasta1, 
+#                           fasta2, 
+#                           by="", 
+#                           lb1 = 1, 
+#                           lb2 = 2, 
+#                           color1 = "darkorange1", 
+#                           color2 = "darkorchid1", 
+#                           comment ="", 
+#                           countFunction = "codon_count",
+#                           ytop = 0){
+#   
+#   if (countFunction == "codon_count"){
+#     df1 <- getSeqFreq(fasta1, by)
+#     df2 <- getSeqFreq(fasta2, by)
+#   }
+#   else {
+    if (countFunction == "NNX"){
+      df1 <- get_NNX_Freq(fasta1)
+      df2 <- get_NNX_Freq(fasta2)
+    } else { return(print("Unkown countFunction")) }
+  } 
+  
+  df1$lb <- lb1
+  df2$lb <- lb2
+  
+  df <- rbind(df1, df2)
+  
+  if (countFunction == "codon_count"){
+    
+    if (by == "same_position"){
+      df <- df[ ,c("1A","1C","1G","1T",
+              "2A","2C","2G","2T",
+              "3A","3C","3G","3T","lb")]
+    }
+    
+    if (by == "same_base"){
+      df <- df[ ,c("A1","A2","A3",
+                "C1","C2","C3",
+                "G1","G2","G3",
+                "T1","T2","T3","lb")]
+    }
+  }
+  
+  
+  library(reshape2)
+  df <- melt(df)
+  
+  
+  if(ytop == 0){
+    ytop <- max(df$value)
+  }
+  
+  print(levels(df$lb))
+  
+  library(ggplot2)
+  p <- ggplot(data = df, aes(x=variable, y=value))+ 
+    geom_boxplot(aes(fill=lb))+
+    scale_fill_manual(values=c(color1, color2), breaks = c(lb1, lb2))+
+    ggtitle(paste(lb1,"vs",lb2,"by",by, comment))+
+    ylim(0,ytop)
+    
+  
+  print(p)
+  
+  return(df)
+}
+```
+
+```{r}
+title <- "Boxplot CDS vs IGORF same position_test"
+pdf(paste(title,".pdf",sep=""))
+ok <- versusBoxplot("Abondance/Scer_CDS.nfasta",
+              "Abondance/Scer_Intergenic.nfasta",
+              "CDS",
+              "IGORF",
+              by = "same_position")
+dev.off()
+```
+
+```{r}
+title <- "Boxplot CDS vs IGORF same base"
+pdf(paste(title,".pdf",sep=""))
+versusBoxplot("Abondance/Scer_CDS.nfasta",
+              "Abondance/Scer_Intergenic.nfasta",
+              "CDS",
+              "IGORF",
+              by = "same_base")
+dev.off()
+```
+
+```{r}
+title <- "Boxplot CDS vs IGORF same position"
+
+ytop = 0.5
+
+pdf(paste(title,".pdf",sep=""))
+
+versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_Intergenic.nfasta",
+              by = "same_position",
+              lb1 = "CDS",
+              lb2 = "IGORF",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "CDS/IGORF",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/AncFragments.nfasta",
+              fasta2 = "regclevure/AncFragments_randomized.nfasta",
+              by = "same_position",
+              lb1 = "Ancestrales",
+              lb2 = "Randomized_ancestrales",
+              color1 = "#8f8f8f",
+              color2 = "#dddddd",
+              comment = "ANCESTRALES",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Denovo.nfasta",
+              fasta2 = "regclevure/Denovo_randomized.nfasta",
+              by = "same_position",
+              lb1 = "De novo",
+              lb2 = "Randomized_De_novo",
+              color1 = "#4169e1",
+              color2 = "#c6d2f6",
+              comment = "DE NOVO",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Occasionally.nfasta",
+              fasta2 = "regclevure/Occasionally_randomized.nfasta",
+              by = "same_position",
+              lb1 = "Occasionally",
+              lb2 = "Randomized_Occasionnally",
+              color1 = "#ffc125",
+              color2 = "#ffe9b4",
+              comment = "OCCASIONNALY",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Selectively.nfasta",
+              fasta2 = "regclevure/Selectively_randomized.nfasta",
+              by = "same_position",
+              lb1 = "_Selectively",
+              lb2 = "Randomized_Selectively",
+              color1 = "#ff0000",
+              color2 = "#ffb2b2",
+              comment = "SELECTIVELY",
+              ytop = ytop)
+
+dev.off())
+```
+
+```{r}
+title <- "Boxplot CDS vs IGORF same base"
+
+ytop = 0.5
+
+pdf(paste(title,".pdf",sep=""))
+
+versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_Intergenic.nfasta",
+              by = "same_base",
+              lb1 = "CDS",
+              lb2 = "IGORF",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "CDS/IGORF",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/AncFragments.nfasta",
+              fasta2 = "regclevure/AncFragments_randomized.nfasta",
+              by = "same_base",
+              lb1 = "Ancestrales",
+              lb2 = "Randomized_ancestrales",
+              color1 = "#8f8f8f",
+              color2 = "#dddddd",
+              comment = "ANCESTRALES",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Denovo.nfasta",
+              fasta2 = "regclevure/Denovo_randomized.nfasta",
+              by = "same_base",
+              lb1 = "De novo",
+              lb2 = "Randomized_De_novo",
+              color1 = "#4169e1",
+              color2 = "#c6d2f6",
+              comment = "DE NOVO",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Occasionally.nfasta",
+              fasta2 = "regclevure/Occasionally_randomized.nfasta",
+              by = "same_base",
+              lb1 = "Occasionally",
+              lb2 = "Randomized_Occasionnally",
+              color1 = "#ffc125",
+              color2 = "#ffe9b4",
+              comment = "OCCASIONNALY",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Selectively.nfasta",
+              fasta2 = "regclevure/Selectively_randomized.nfasta",
+              by = "same_base",
+              lb1 = "_Selectively",
+              lb2 = "Randomized_Selectively",
+              color1 = "#ff0000",
+              color2 = "#ffb2b2",
+              comment = "SELECTIVELY",
+              ytop = ytop)
+
+dev.off()
+```
+
+# NNX
+
+```{r}
+# Return the mean frequency of a given reference set of nucleotidic sequences
+get_NNX_Freq <- function(Set){
+  
+  # Absolute frequency for each of the 64 codons for each nucleotide sequence
+  library(coRdon)
+  set_ref <- readSet(file = Set)
+  codon_Table_ref <- codonTable(set_ref)
+  codon_count <- codonCounts(codon_Table_ref)
+  
+  
+  # Retrieve the first two letters of codon_count colnames
+  NNNs <- colnames(codon_count)
+  NNX_colnames <- substr(NNNs ,start = 1,stop = 2)
+  
+  
+  # Generate all possible NNX codons first two letters
+  NNXs <- c()
+  for (base1 in c("T","C","A","G")) {
+    for (base2 in c("T","C","A","G")){
+      NNX <- paste(base1, base2, sep="")
+      NNXs <- c(NNXs, NNX)
+    }
+  }
+  
+  # Create an empty dataframe to return
+  NNX_count <- data.frame(matrix(ncol = 16, nrow = nrow(codon_count)))
+  colnames(NNX_count) <- NNXs
+  
+  
+  # Compute codon_count row sums
+  rowsums <- rowSums(codon_count)
+  
+  for (NNX in NNXs){
+    col_tosum <- grep(NNX, NNX_colnames)
+    NNX_count[ ,NNX] <- rowSums(codon_count[ ,col_tosum])/rowsums
+    
+  }
+  
+  colnames(NNX_count) <- paste(colnames(NNX_count),"N", sep="")
+
+  return(NNX_count)
+}
+```
+
+```{r}
+NNX_cds <- get_NNX_Freq(Set = "Abondance/Scer_CDS.nfasta")
+NNX_igorfs <- get_NNX_Freq(Set = "Abondance/Scer_Intergenic.nfasta")
+```
+
+```{r}
+title <- "Boxplot CDS vs IGORF NNX Scer"
+
+ytop = 0.3
+
+pdf(paste(title,".pdf",sep=""))
+
+versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_Intergenic.nfasta",
+              lb1 = "CDS",
+              lb2 = "IGORF",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "CDS/IGORF",
+              countFunction = "NNX",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/AncFragments.nfasta",
+              fasta2 = "regclevure/AncFragments_randomized.nfasta",
+              lb1 = "Ancestrales",
+              lb2 = "Randomized_ancestrales",
+              color1 = "#8f8f8f",
+              color2 = "#dddddd",
+              comment = "ANCESTRALES",
+              countFunction = "NNX",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Denovo.nfasta",
+              fasta2 = "regclevure/Denovo_randomized.nfasta",
+              lb1 = "De novo",
+              lb2 = "Randomized_De_novo",
+              color1 = "#4169e1",
+              color2 = "#c6d2f6",
+              comment = "DE NOVO",
+              countFunction = "NNX",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Occasionally.nfasta",
+              fasta2 = "regclevure/Occasionally_randomized.nfasta",
+              lb1 = "Occasionally",
+              lb2 = "Randomized_Occasionnally",
+              color1 = "#ffc125",
+              color2 = "#ffe9b4",
+              comment = "OCCASIONNALY",
+              countFunction = "NNX",
+              ytop = ytop)
+
+versusBoxplot(fasta1 = "regclevure/Selectively.nfasta",
+              fasta2 = "regclevure/Selectively_randomized.nfasta",
+              lb1 = "_Selectively",
+              lb2 = "Randomized_Selectively",
+              color1 = "#ff0000",
+              color2 = "#ffb2b2",
+              comment = "SELECTIVELY",
+              countFunction = "NNX",
+              ytop = ytop)
+
+dev.off()
+```
+
+```{r}
+versusBoxplot(fasta1 = "../",
+              fasta2 = "Abondance/Scer_Intergenic.nfasta",
+              lb1 = "CDS",
+              lb2 = "IGORF",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "CDS/IGORF",
+              countFunction = "NNX",
+              ytop = ytop)
+```
+
+# Dated CDS
+
+```{r}
+# Need to get 10 fasta of dated genes
+genes.age <- read.csv("41559_2017_BFs415590170146_MOESM451_ESM.csv", header = T)
+
+# filtering
+# genes.age <- genes.age[which(genes.age$ExcludedAsDubious == 0 & genes.age$ExcludedAsScerevisiaeSpecific == 0 & genes.age$ExcludedAsUnclassified == 0),]
+
+genes.age$BLASTpPhylostratum <- factor(genes.age$BLASTpPhylostratum)
+ages_nb <- c()
+
+for (age in levels(genes.age$BLASTpPhylostratum)){
+  
+  print(paste("Age = ",age, sep=""))
+  print(genes.age$GeneFamilyPhyloTaxonomicGroup[grep(age,genes.age$BLASTpPhylostratum)[1]])
+  cds <- genes.age$SGDGeneUID[genes.age$BLASTpPhylostratum == age]
+  write.csv(x = cds,
+            file =  paste("Abondance/Scer_genenames_",age,".txt",sep=""), row.names = F, quote = F)
+  
+  ages_nb <- c(ages_nb, length(cds))
+  
+}
+```
+
+```{r}
+title <- "Boxplot dated CDS vs randomized same_position Scer"
+
+ytop = 0.5
+
+
+pdf(paste(title,".pdf",sep=""))
+
+output_df <- versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_CDS_randomized.nfasta",
+              by = "same_position",
+              lb1 = "CDS",
+              lb2 = "randomized CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "All",
+              title = "Same-position codons group distribution in S. cerevisiea ",
+              ytop = ytop)
+
+for (age in 0:10){
+  output_df <- rbind(output_df, versusBoxplot(fasta1 = paste("Abondance/Scer_CDS_age_",age,".nfasta",sep=""),
+              fasta2 = paste("Abondance/Scer_CDS_age_",age,"_randomized.nfasta",sep=""),
+              by = "same_position",
+              lb1 = "CDS",
+              lb2 = "randomized CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              countFunction = "codon_count",
+              comment = paste("AGE =",age," n =",ages_nb[age+1]),
+              title = paste("Same-position codons group distribution in S. cerevisiea : age", age),
+              ytop = ytop))
+}
+
+dev.off()
+
+pdf(paste(title,"_by_variable.pdf",sep=""))
+
+for (variable in levels(output_df$variable)){
+  
+  df <- output_df[-grep("randomized",output_df$lb),]
+  df <- df[df$variable == variable,]
+  
+  df$lb <- factor(df$lb,
+    levels = unique(df$lb),ordered = TRUE)
+  
+  # comps <- c()
+  # cat <- levels(df$lb)
+  # for (i in 3:(length(cat)-1)){
+  #   comp <- c(cat[i], cat[i+1])
+  #   comps[i-2] <- comp
+  # }
+  
+  # comps <- list(comps)
+  # comps <- list(comps)
+  # print(paste("comps = ", comps, sep=""))
+  
+  comps <- list(c("ALL CDS_CDS","AGE = 0  n = 5_CDS"),
+                c("AGE = 1  n = 2589_CDS", "AGE = 2  n = 1570_CDS"),
+                c("AGE = 3  n = 125_CDS", "AGE = 4  n = 290_CDS"),
+                c("AGE = 5  n = 76_CDS", "AGE = 6  n = 140_CDS"),
+                c("AGE = 7  n = 70_CDS", "AGE = 8  n = 358_CDS"),
+                c("AGE = 9  n = 346_CDS", "AGE = 10  n = 267_CDS"))
+
+  
+  library(ggpubr)
+  p <- ggplot(data = df, aes(x=lb, y=value))+ 
+    geom_boxplot()+
+    # stat_compare_means(comparisons = comps)+ # Add pairwise comparisons p-value
+    # stat_compare_means(label.y = ytop)+
+    ggtitle(variable)+
+    ylim(0,ytop)+
+    theme(axis.text.x = element_text(angle = 90))
+    
+  
+  print(p)
+  
+}
+
+dev.off()
+```
+
+```{r}
+title <- "Boxplot dated CDS vs randomized same_base Scer"
+
+ytop = 0.5
+
+pdf(paste(title,".pdf",sep=""))
+
+versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_CDS_randomized.nfasta",
+              by = "same_base",
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "ALL CDS",
+              ytop = ytop)
+
+for (age in 0:10){
+  versusBoxplot(fasta1 = paste("Abondance/Scer_CDS_age_",age,".nfasta",sep=""),
+              fasta2 = paste("Abondance/Scer_CDS_age_",age,"_randomized.nfasta",sep=""),
+              by = "same_base",
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              countFunction = "codon_count",
+              comment = paste("AGE =",age," n =",ages_nb[age+1]),
+              ytop = ytop)
+}
+
+dev.off()
+```
+
+```{r}
+title <- "Boxplot dated CDS vs randomized NNX Scer"
+
+ytop = 0.25
+
+pdf(paste(title,".pdf",sep=""))
+
+versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_CDS_randomized.nfasta",
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              countFunction = "NNX",
+              comment = "ALL CDS",
+              ytop = ytop)
+
+for (age in 0:10){
+  versusBoxplot(fasta1 = paste("Abondance/Scer_CDS_age_",age,".nfasta",sep=""),
+              fasta2 = paste("Abondance/Scer_CDS_age_",age,"_randomized.nfasta",sep=""),
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              countFunction = "NNX",
+              comment = paste("AGE =",age),
+              ytop = ytop)
+}
+
+dev.off()
+```
+
+```{r}
+title <- "Boxplot CDS vs randomized same_position Scer"
+
+ytop = 0.5
+
+
+pdf(paste(title,".pdf",sep=""))
+
+output_df <- versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_CDS_randomized.nfasta",
+              by = "same_position",
+              lb1 = "CDS",
+              lb2 = "randomized CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "All",
+              title = "Same-position codons group distribution in S. cerevisiea ",
+              ytop = ytop)
+dev.off()
+```
+
+## By variable
+
+### Same-position
+
+```{r}
+title <- "Boxplot dated CDS vs randomized same_position Scer"
+
+ytop = 0.5
+
+
+pdf(paste(title,".pdf",sep=""))
+
+output_df <- versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_CDS_randomized.nfasta",
+              by = "same_position",
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "ALL CDS",
+              ytop = ytop)
+
+for (age in 0:10){
+  output_df <- rbind(output_df, versusBoxplot(fasta1 = paste("Abondance/Scer_CDS_age_",age,".nfasta",sep=""),
+              fasta2 = paste("Abondance/Scer_CDS_age_",age,"_randomized.nfasta",sep=""),
+              by = "same_position",
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              countFunction = "codon_count",
+              comment = paste("AGE =",age," n =",ages_nb[age+1]),
+              ytop = ytop))
+}
+
+dev.off()
+
+pdf(paste(title,"_by_variable.pdf",sep=""))
+
+for (variable in levels(output_df$variable)){
+  
+  df <- output_df[-grep("randomized",output_df$lb),]
+  df <- df[df$variable == variable,]
+  
+  df$lb <- factor(df$lb,
+    levels = unique(df$lb),ordered = TRUE)
+
+  
+  comps <- list(c("ALL CDS_CDS","AGE = 0  n = 5_CDS"),
+                c("AGE = 1  n = 2589_CDS", "AGE = 2  n = 1570_CDS"),
+                c("AGE = 3  n = 125_CDS", "AGE = 4  n = 290_CDS"),
+                c("AGE = 5  n = 76_CDS", "AGE = 6  n = 140_CDS"),
+                c("AGE = 7  n = 70_CDS", "AGE = 8  n = 358_CDS"),
+                c("AGE = 9  n = 346_CDS", "AGE = 10  n = 267_CDS"))
+
+  
+  library(ggpubr)
+  p <- ggplot(data = df, aes(x=lb, y=value))+ 
+    geom_boxplot()+
+    # stat_compare_means(comparisons = comps)+ # Add pairwise comparisons p-value
+    # stat_compare_means(label.y = ytop)+
+    ggtitle(variable)+
+    ylim(0,ytop)+
+    theme(axis.text.x = element_text(angle = 90))
+    
+  
+  print(p)
+  
+}
+
+dev.off()
+```
+
+### XYN
+
+```{r}
+title <- "Boxplot dated CDS vs randomized NNX Scer"
+
+ytop = 0.5
+
+
+pdf(paste(title,".pdf",sep=""))
+
+output_df <- versusBoxplot(fasta1 = "Abondance/Scer_CDS.nfasta",
+              fasta2 = "Abondance/Scer_CDS_randomized.nfasta",
+              lb1 = "CDS",
+              lb2 = "randomized_CDS",
+              color1 = "#e09347",
+              color2 = "#bf5ae0",
+              comment = "ALL CDS",
+              countFunction = "NNX",
+              ytop = ytop)
+
+for (age in 0:10){
+  output_df <- rbind(output_df, 
+                     versusBoxplot(fasta1 = paste("Abondance/Scer_CDS_age_",age,".nfasta",sep=""),
+                                   fasta2 = paste("Abondance/Scer_CDS_age_",age,"_randomized.nfasta",sep=""),
+                                   lb1 = "NNX",
+                                   lb2 = "randomized_CDS",
+                                   color1 = "#e09347",
+                                   color2 = "#bf5ae0",
+                                   countFunction = "NNX",
+                                   comment = paste("AGE =",age," n =",ages_nb[age+1]),
+                                   ytop = ytop))
+}
+
+dev.off()
+
+pdf(paste(title,"_by_variable.pdf",sep=""))
+
+for (variable in levels(output_df$variable)){
+  
+  df <- output_df[-grep("randomized",output_df$lb),]
+  df <- df[df$variable == variable,]
+  
+  df$lb <- factor(df$lb,
+    levels = unique(df$lb),ordered = TRUE)
+  
+
+
+  
+  comps <- list(c("ALL CDS_CDS","AGE = 0  n = 5_CDS"),
+                c("AGE = 1  n = 2589_CDS", "AGE = 2  n = 1570_CDS"),
+                c("AGE = 3  n = 125_CDS", "AGE = 4  n = 290_CDS"),
+                c("AGE = 5  n = 76_CDS", "AGE = 6  n = 140_CDS"),
+                c("AGE = 7  n = 70_CDS", "AGE = 8  n = 358_CDS"),
+                c("AGE = 9  n = 346_CDS", "AGE = 10  n = 267_CDS"))
+
+  tags <- c("ALL CDS")
+  for (age in 0:10){
+    tags <- c(tags, paste("AGE =",age," n =",ages_nb[age+1]))
+  }
+  
+  library(ggpubr)
+  p <- ggplot(data = df, aes(x=lb, y=value))+ 
+    geom_boxplot()+
+    # stat_compare_means(comparisons = comps)+ # Add pairwise comparisons p-value
+    # stat_compare_means(label.y = ytop)+
+    ggtitle(paste(variable,"frequency among CDS of different ages in S. cerevisiae"))+
+    ylab("relative frequency")+ xlab("")+
+    scale_x_discrete(labels=tags)+
+    scale_fill_grey(start = 0.5, end = 0.9)+
+    theme_minimal()+
+    theme(legend.position="bottom")+
+    theme(axis.text.x = element_text(angle = 90))
+    
+  
+  print(p)
+  
+}
+
+dev.off()
+```
