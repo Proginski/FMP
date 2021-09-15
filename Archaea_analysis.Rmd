@@ -11,6 +11,8 @@ knitr::opts_chunk$set(echo = TRUE)
 setwd("/home1/paul.roginski/WD/Archées propre")
 ```
 
+The user is encouraged to use ctr+shift+F4 on Rstudio to benefit from the visual editor.
+
 # Setup
 
 ## GC content computation
