@@ -1,0 +1,1505 @@
+---
+title: "Acrhaea"
+author: "Paul Roginski"
+date: "23/04/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#setwd("C:/Users/Snoopybreton/Desktop/BIM/Archaea data")
+setwd("/home1/paul.roginski/WD/Archées propre")
+```
+
+# Setup
+
+## GC content computation
+
+```{r}
+getTauxGC <- function(directory, suffixToRemove){
+  
+  library(stringr)
+  if(str_sub(directory,-1) != "/"){
+    directory <- paste(directory,"/",sep="")    
+  }
+  # Directory with fasta files
+  files <- list.files(directory)
+
+  genome <- c()
+  taux <- c()
+  seq_length <- c()
+  library(stringr)
+  
+  for (i in 1:length(files)){
+    
+    print(i)
+    file <- files[i]
+    print(file)
+    
+    genome[i] <- file
+    
+    # Select everything but headers
+    content <- readLines(paste(directory,file, sep=""))
+    headers_id <- grep(">", content)
+    sequences <- as.list(content[-headers_id])
+    # Tranform all the sequences from the fasta into a signle big sequence.
+    sequence_unique <- gsub(" ","",do.call(paste, sequences))
+    
+    gc <- str_count(sequence_unique, "G|C")
+    seq_length[i] <- str_count(sequence_unique, "G|C|A|T")
+    taux[i] <- gc/seq_length[i]
+    
+  }
+  
+  genome <- gsub(suffixToRemove, "", genome)
+  
+  tauxGC_Df <- data.frame(genome = genome, GC = taux)
+  
+  return(tauxGC_Df)
+  
+}
+```
+
+### tauxGC_whole
+
+```{r}
+tauxGC_cds <- getTauxGC("codingNfastaNP/")
+tauxGC_interG <- getTauxGC("intergenicNfastaNP/")
+tauxGC_genomes <- getTauxGC("renamedGenomesFasta/")
+
+tauxGCs <- tauxGC_genomes
+tauxGCs$GC_cds <- tauxGC_cds$GC
+tauxGCs$GC_interG <- tauxGC_interG$GC
+
+saveRDS(tauxGCs, "tauxGCs.rds")
+
+tauxGC_whole <- readRDS("tauxGCs.rds")
+```
+
+## Pheno data
+
+This phenotype data was used to investigate differences between genomes environment.
+
+```{r}
+library(readxl)
+
+# Pheno data on the archaea whithout the first names column
+pheno_group <- as.data.frame(read_excel("Archaea_list_harmonized.xls",
+                                  col_names = FALSE, na = "NA")[,-1])
+# Remove rows with NA in first coolumn (specie)
+pheno_group <- pheno_group[!is.na(pheno_group[,1]), ]
+# Use the first column as row names
+row.names(pheno_group) <- pheno_group[,1]
+pheno_group <- pheno_group [,-1]
+colnames(pheno_group) <- c("Temp","Halophilie","pH")
+pheno_group$Halophilie <- as.factor(pheno_group$Halophilie)
+
+# Add the label for the corresponding group of environment
+pheno_group$group <- NA
+pheno_group$group[grep("moderate-halophilic", pheno_group$Halophilie)] <- "moderate"
+pheno_group$group[grep("extreme-halophilic", pheno_group$Halophilie)] <- "extreme"
+pheno_group$group[pheno_group$pH < 4] <- "acid"
+pheno_group$group <- factor(pheno_group$group)
+
+levels(pheno_group$group) <- c("acid", "extreme", "moderate", "mesophile", "thermophile", "hyperthermophile")
+
+pheno_group[is.na(pheno_group$group) &
+               pheno_group$Temp < 40,"group"] <- "mesophile"
+pheno_group[is.na(pheno_group$group) &
+              pheno_group$Temp >= 40 &
+              pheno_group$Temp <= 80,"group"] <- "thermophile"
+pheno_group[is.na(pheno_group$group) &
+              pheno_group$Temp > 80,"group"] <- "hyperthermophile"
+
+table(pheno_group$group)
+
+# Add GC content information
+# This operation might take a while...
+# Fasta files need to be sorted the same way as genome names in the meta data.
+# Whole genome
+tauxGC_whole <- getTauxGC("renamedGenomesFasta/", suffixToRemove = ".fna")
+
+if (identical(tauxGC_whole$genome,
+              factor(rownames(pheno_group)))){
+  pheno_group$GC_whole <- tauxGC_whole$GC
+}
+
+# cds GC content
+tauxGC_cds <- getTauxGC("codingNfastaNP/", suffixToRemove = "_coding_np.nfasta")
+
+if (identical(tauxGC_cds$genome,
+              factor(rownames(pheno_group)))){
+  pheno_group$GC_cds <- tauxGC_cds$GC
+}
+
+# interG GC content
+tauxGC_interG <- getTauxGC("interGNfastaNP/", suffixToRemove =  "_noncoding_np.nfasta")
+
+if (identical(tauxGC_interG$genome,
+              factor(rownames(pheno_group)))){
+  pheno_group$GC_interG <- tauxGC_interG$GC
+}
+
+# Save the object
+saveRDS(pheno_group, file = "pheno_group.rds")
+```
+
+```{r}
+pheno_group <- readRDS("pheno_group.rds")
+```
+
+## Tab data
+
+.tab containing OrFold output.
+
+```{r}
+getPhenoTabs <- function(inputDirectory, suffixToRemove){
+  
+   files <- list.files(inputDirectory, full.names = T)
+   
+   print(paste("Number of genomes to treat : ",length(files)))
+   
+   datalist = list()
+   
+   for (i in 1:length(files)){
+     
+     file <- files[i]
+     genome <- gsub(inputDirectory, "", file)
+     genome <- gsub("/", "", genome)
+     genome <- gsub(suffixToRemove, "", genome)
+
+     datalist[[i]] <- cbind(genome,read.table(file))
+     
+     print(paste("Collected : ",i))
+   }
+   
+   print("Binding Tabs from all the genomes...")
+   tabs <- do.call(rbind, datalist)
+   colnames(tabs) <- c("Genome","Seq_ID","HCA","Disord","Aggreg")
+   print("Done.")
+
+   pheno_column <- pheno_group
+   pheno_column$Genome <- rownames(pheno_group)
+   
+   print("Merging dataframe with metadata...")
+   tabs <- merge(tabs, pheno_column, by="Genome", all = T)
+   print("Done.")
+   
+   return(tabs)
+}
+```
+
+```{r}
+phenoTabs_cds <- getPhenoTabs("codingTabsNP/","_codingNP.tab")
+phenoTabs_interG <- getPhenoTabs("interGTabsNP/", "_noncodingNP.tab")
+
+saveRDS(phenoTabs_cds,"phenoTabs_cds.rds")
+saveRDS(phenoTabs_interG,"phenoTabs_interG.rds")
+```
+
+```{r}
+phenoTabs_cds <- readRDS("phenoTabs_cds.rds")
+phenoTabs_interG <- readRDS("phenoTabs_interG.rds")
+```
+
+# GC content analysis
+
+## CDS vs intergenic
+
+```{r}
+# This functio plots the overall GC content of CDS sequences at a genome scale vs the overall GC content of intergenic sequences.
+interGvsCDS_GCPlot <- function(title = "GC content of CDS vs IGORF in Archaea", 
+                               Plotly = TRUE){
+
+  library(ggplot2)
+  library(ggpubr)
+  p <- ggplot(pheno_group, aes(x= GC_interG, y= GC_cds, color = group)) + 
+    ggtitle(title)+
+    geom_point()+
+    geom_smooth(method=lm, aes(group=1))+
+    stat_cor(method = "pearson", 
+             label.x = 0.2, label.y = 0.7,
+             data = pheno_group, 
+             aes(x= GC_interG, y= GC_cds),
+             inherit.aes = FALSE)+
+    geom_label(
+      label= paste("y = ", 
+                   round(lm(formula = GC_cds~GC_interG, data = pheno_group)$coefficients[2], 
+                         digits = 2),
+                   "x + ",
+                   round(lm(formula = GC_cds~GC_interG, data = pheno_group)$coefficients[1],
+                         digits = 2), 
+                   sep = ""),
+      x=0.2,
+      y=0.65, 
+      hjust=0,
+      # Rectangle size around label
+      label.size = 0.35,
+      color = "black")
+  
+  
+   # Interactive plot
+  if(Plotly){
+    
+    library(plotly)
+    interplot <- ggplotly(p)
+    print(interplot)
+     
+    library(htmlwidgets)
+    saveWidget(interplot, file = paste(title,".html")) 
+    
+    }
+   
+  else{
+    
+    print(p)
+    
+    pdf(file = paste(title,".pdf"))
+    print(p)
+    dev.off()
+    
+    }
+}
+
+interGvsCDS_GCPlot(Plotly = F)
+```
+
+## GC content distribution CDS vs intergenic (boxplot)
+
+```{r}
+distriGC <- function(column ,title){
+  
+  df <- merge(tauxGCs, pheno_group, by.x ="genome", by.y = "row.names",all = T)
+  
+  library(ggplot2)
+  library(ggpubr)
+  p <- ggplot(df, aes(x=group, y=df[,column])) + 
+    geom_boxplot()+
+    ggtitle(title)
+    
+    print(p)
+    
+    pdf(file = paste(title,".pdf"))
+    print(p)
+    dev.off()
+    
+}
+```
+
+```{r}
+distriGC("GC_cds",  title = "Distribution du taux GC des CDS Archées")
+distriGC("GC_interG", title =  "Distribution du taux GC des IGORF Archées") 
+```
+
+# Codon material
+
+## Codon table
+
+Absolute frequency of each codon by genome.
+
+```{r}
+get_codon_table <- function(fastaDirectory, 
+                            removePatern = '',
+                            individual_seq = F) {
+  
+  library(coRdon)
+  library(stringr)
+  if(str_sub(fastaDirectory,-1) != "/"){
+    fastaDirectory <- paste(fastaDirectory,"/",sep="")    
+  }
+  
+  # List the files in the given f=directory with entier names
+  files <- list.files(fastaDirectory)
+  
+  print(paste("Number of genomes to treat :",length(files)))
+  
+  
+  # Keep all individual sequences
+  if (individual_seq){
+
+    # First file : get set object and the nb of sequences contained in the file
+    set_pooled <- readSet(file = paste(fastaDirectory, files[1], sep = ""))
+    genomes_seq_nb <- length(set_pooled@ranges)
+    
+    for(i in 2:length(files)){
+      
+      print(file)
+      
+      file <- files[i]
+      
+      # For each file get the set object
+      curr_set <- readSet(file = paste(fastaDirectory, file, sep = ""))
+      # Add it to the previously obtained set object
+      set_pooled <- c(set_pooled, curr_set)
+      
+      # Store the number of seuqneces for each file
+      genomes_seq_nb <- c(genomes_seq_nb, length(curr_set@ranges))
+      
+      print(paste("Pooled : ",i))
+      
+    }
+    
+    print("Establishing the codon table...")
+    codon_Table <- codonTable(set_pooled)
+    
+    print("Establishing the codon counts...")
+    codon_Counts <- codonCounts(codon_Table)
+    
+    print("Genomes names...")
+    codon_Counts <- as.data.frame(codon_Counts)
+    
+    files <- gsub(removePatern,'', files)
+    # Repeat the name of each file as many times as its number of sequences
+    codon_Counts$Genome <- rep(files, genomes_seq_nb)
+    
+    print("Seq_ID")
+    codon_Counts$Seq_ID <- codon_Table@ID
+    
+    print('Done.')
+  
+    return(codon_Counts)
+  }
+  
+  # Sum individual sequences into a genome scale count
+  else{ 
+    
+    
+    codon_list <- c( "AAA", "AAC", "AAG", "AAT", "ACA", "ACC", "ACG", "ACT", "AGA", "AGC", "AGG", "AGT", "ATA", "ATC", "ATG", "ATT", "CAA", "CAC", "CAG", "CAT", "CCA", "CCC", "CCG", "CCT", "CGA", "CGC", "CGG", "CGT", "CTA", "CTC", "CTG", "CTT", "GAA", "GAC", "GAG", "GAT", "GCA", "GCC", "GCG", "GCT", "GGA", "GGC", "GGG", "GGT", "GTA", "GTC", "GTG", "GTT", "TAA", "TAC", "TAG", "TAT", "TCA", "TCC", "TCG", "TCT", "TGA", "TGC", "TGG", "TGT", "TTA", "TTC", "TTG", "TTT")
+    
+    codon_df <- data.frame(matrix(ncol = length(codon_list), nrow = 0))
+    colnames(codon_df) <- codon_list
+
+    i <- 0
+    
+    
+    for(file in files){
+      
+      print(file)
+      
+      set <- readSet(file = paste(fastaDirectory, file, sep=""))
+      codon_Table <- codonTable(set)
+      codon_Counts <- codonCounts(codon_Table)
+      codon_sum <- colSums(codon_Counts)
+      
+      codon_df[file,] <- codon_sum
+      
+      i <- i+1
+      print(paste("Treated : ",i))
+      
+    }
+    
+    row.names(codon_df) <- gsub(removePatern,'', 
+                                row.names(codon_df))
+    return(codon_df)
+  }
+
+}
+```
+
+```{r}
+# get_codon_table <- function(fastaDirectory, 
+#                             removePatern = '',
+#                             individual_seq = F) {
+#   
+#   library(stringr)
+#   if(str_sub(fastaDirectory,-1) != "/"){
+#     fastaDirectory <- paste(fastaDirectory,"/",sep="")    
+#   }
+#   
+#   codon_list <- c( "AAA", "AAC", "AAG", "AAT", "ACA", "ACC", "ACG", "ACT", "AGA", "AGC", "AGG", "AGT", "ATA", "ATC", "ATG", "ATT", "CAA", "CAC", "CAG", "CAT", "CCA", "CCC", "CCG", "CCT", "CGA", "CGC", "CGG", "CGT", "CTA", "CTC", "CTG", "CTT", "GAA", "GAC", "GAG", "GAT", "GCA", "GCC", "GCG", "GCT", "GGA", "GGC", "GGG", "GGT", "GTA", "GTC", "GTG", "GTT", "TAA", "TAC", "TAG", "TAT", "TCA", "TCC", "TCG", "TCT", "TGA", "TGC", "TGG", "TGT", "TTA", "TTC", "TTG", "TTT")
+#   
+#   codon_df <- data.frame(matrix(ncol = length(codon_list), nrow = 0))
+#   colnames(codon_df) <- codon_list
+#   
+#   files <- list.files(fastaDirectory)
+#   
+#   print(paste("Number of genomes to treat :",length(files)))
+#   i <- 0
+#   
+#   # Initialize a potential genome column
+#   if(individual_seq){ genome_col <- c() }
+#   
+#   library(coRdon)
+#   for(file in files){
+#     
+#     file_short <- gsub(removePatern,'', file)
+#     print(file)
+#     
+#     set <- readSet(file = paste(fastaDirectory, file, sep=""))
+#     codon_Table <- codonTable(set)
+#     codon_Counts <- codonCounts(codon_Table)
+#     
+#     # Keep all individual sequences
+#     if(individual_seq){
+#       codon_df[]
+#       length(set@ranges)
+#     }
+#     # Sum individual sequences into a genome scale count
+#     else{
+#       codon_sum <- colSums(codon_Counts)
+#       codon_df[file,] <- codon_sum
+#     }
+# 
+#     
+#     i <- i+1
+#     print(paste("Treated : ",i))
+#     
+#   }
+#   
+#   row.names(codon_df) <- gsub(removePatern,'', 
+#                               row.names(codon_df))
+#   return(codon_df)
+# }
+```
+
+```{r}
+codon_df_interG <- get_codon_table(fastaDirectory = "interGNfastaNP/", 
+                                       removePatern = "_noncoding_np.nfasta")
+
+codon_df_cds <- get_codon_table(fastaDirectory = "codingNfastaNP/", 
+                                       removePatern = "_coding_np.nfasta")
+
+codon_df_random <- get_codon_table(fastaDirectory = "../Archaea_Data/HCA_clustNlink_randomCDS", 
+                                       removePatern = "_coding_np_randomized_HCA_clustNlink.nfasta")
+
+saveRDS(codon_df_interG, "codon_df_interG.rds")
+saveRDS(codon_df_cds, "codon_df_cds.rds")
+saveRDS(codon_df_random, "codon_df_random.rds")
+
+codon_df_cds <- readRDS("codon_df_cds.rds")
+codon_df_random <- readRDS("codon_df_random.rds")
+```
+
+```{r}
+codon_df_interG_ALL <- get_codon_table(fastaDirectory = "interGNfastaNP/", 
+                                   removePatern = "_noncoding_np.nfasta",
+                                   individual_seq)
+
+codon_df_cds_ALL <- get_codon_table(fastaDirectory = "../Archaea_Data/codingNfastaNP/", 
+                                removePatern = "_coding_np.nfasta",
+                                individual_seq = T)
+
+codon_df_random_ALL <- get_codon_table(fastaDirectory = "../Archaea_Data/HCA_clustNlink_randomCDS/", 
+                                       removePatern = "_coding_np_randomized_HCA_clustNlink.nfasta",
+                                       individual_seq = T)
+
+saveRDS(codon_df_cds_ALL, "codon_df_cds_ALL.rds")
+saveRDS(codon_df_random_ALL, "codon_df_random_ALL.rds")
+
+codon_df_cds_ALL <- readRDS("codon_df_cds_ALL.rds")
+codon_df_random_ALL <- readRDS("codon_df_random_ALL.rds")
+```
+
+## AA-codon table
+
+AAcodons is a AA-codon relationship table.
+
+```{r}
+codons <- c()
+for (base1 in c('T','C','A','G')) {
+  for (base2 in c('T','C','A','G')) {
+    for (base3 in c('T','C','A','G')) {
+      codons <- c(codons, paste(base1, base2, base3, sep=""))
+    }
+  }
+}
+
+letterCode1 <- c("F", "F", "L", "L", "S", "S", "S", "S", "Y", "Y", "X", "X", "C", "C", "X", "W", "L", "L", "L", "L", "P", "P", "P", "P", "H", "H", "Q", "Q", "R", "R", "R", "R", "I", "I", "I", "M", "T", "T", "T", "T", "N", "N", "K", "K", "S", "S", "R", "R", "V", "V", "V", "V", "A", "A", "A", "A", "D", "D", "E", "E", "G", "G", "G", "G")
+
+letterCOde3 <- c("Phe", "Phe", "Leu", "Leu", "Ser", "Ser", "Ser", "Ser", "Tyr", "Tyr", "Xxx", "Xxx", "Cys", "Cys", "Xxx", "Trp", "Leu", "Leu", "Leu", "Leu", "Pro", "Pro", "Pro", "Pro", "His", "His", "Gln", "Gln", "Arg", "Arg", "Arg", "Arg", "Ile", "Ile", "Ile", "Met", "Thr", "Thr", "Thr", "Thr", "Asn", "Asn", "Lys", "Lys", "Ser", "Ser", "Arg", "Arg", "Val", "Val", "Val", "Val", "Ala", "Ala", "Ala", "Ala", "Asp", "Asp", "Glu", "Glu", "Gly", "Gly", "Gly", "Gly")
+
+AAcodons <- data.frame(codon = codons, letterCode1, letterCOde3)
+```
+
+# getAAfreq
+
+```{r}
+getAAfreq <- function(codon_df){
+  
+  # The dataframe that will receive the frequency of each AA
+  AAfreqDF <- data.frame(matrix(ncol = length(unique(AAcodons$letterCOde3)),
+                                nrow = nrow(codon_df)))
+    rownames(AAfreqDF) <- rownames(codon_df)
+    colnames(AAfreqDF) <- unique(AAcodons$letterCOde3)
+    
+  for (AA in unique(AAcodons$letterCOde3)){
+
+    print(AA)
+    # The codons that code for this AA
+    assoc_codons <- AAcodons$codon[grep(AA, AAcodons$letterCOde3)]
+    
+    # The counts of each of these codons
+    count_ascodons <- codon_df[,AAcodons$codon[grep(AA, AAcodons$letterCOde3)]]
+
+    # Because of Met and Thr...
+    if(length(colnames(count_ascodons)) > 1){
+      # The some e.i. the counts of the AA
+      countAA <-apply(count_ascodons, 1, sum)
+    } 
+    # If only one codon,
+    else {
+      countAA <- count_ascodons
+    }
+    
+    # The frequency of the AA (counts/sum of the counts of all codons)
+    freqAA <- countAA/rowSums(codon_df)
+    
+    # The column of the AA is filled with its frequencies in the different genomes
+    AAfreqDF[ ,AA] <- freqAA
+  }
+  
+    return(AAfreqDF)
+}
+```
+
+```{r}
+AA_cds <- getAAfreq(codon_df_cds)
+AA_random <- getAAfreq(codon_df_random)
+
+lb1 <- "CDS"
+lb2 <- "randomized CDS"
+
+color1 = "#e09347"
+color2 = "#bf5ae0"
+
+df <- data.frame(rbind(AA_cds,AA_random))
+df$lb <- c(rep(lb1,nrow(AA_cds)), rep(lb2,nrow(AA_random)))
+
+library(reshape2)
+library(ggthemes)
+df <- melt(df)
+
+title <- "AA distribution in archeal genomes"
+library(ggplot2)
+p <- ggplot(data = df, aes(x=variable, y=value))+ 
+  geom_boxplot(aes(fill=lb))+
+  scale_fill_grey(start = 0.5, end = 0.9)+
+  # scale_fill_manual(values=c(color1, color2), breaks = c(lb1, lb2))+
+  ggtitle(title)+
+  labs(fill = "Sequence type")+
+  xlab("AA") + ylab("mean frequency")+
+  ylim(c(0,0.12))+
+  theme_minimal()+
+  theme(axis.title.x = element_blank())+
+  theme(legend.position="bottom")
+  
+pdf(paste(title,".pdf",sep=""))
+print(p)
+dev.off()
+```
+
+# 64 codons density by GC content
+
+```{r}
+get64GC <- function(codon_df1, codon_df2, lb1, lb2, save_as_pdf = F, title = "64 codons plus AA frequency against genome GC content"){
+  
+  if (save_as_pdf){ pdf(paste(title, ".pdf", sep="")) }
+  
+  # Check that genomes names are identical in all df
+  if(identical(rownames(codon_df1),tauxGC_whole$genome) & identical(rownames(codon_df2),tauxGC_whole$genome)){
+    
+    # Get relative codon frequencies
+    rel_cdf1 <- as.data.frame(t(scale(t(codon_df1), center = FALSE, scale = colSums(t(codon_df1)))))
+    rel_cdf2 <- as.data.frame(t(scale(t(codon_df2), center = FALSE, scale = colSums(t(codon_df2)))))
+  
+    # Since genomes are in the same order, just retrieve genomes GC content
+    rel_cdf1$TauxGC <- tauxGC_whole$GC
+    # Assign a particular label for each of the classes ("curves") to plot
+    rel_cdf1$Region <- lb1
+    
+    rel_cdf2$TauxGC <- tauxGC_whole$GC
+    rel_cdf2$Region <- lb2
+  
+    # Get the relative AA freqeuency from the dedicated function
+    AA_df <- getAAfreq(codon_df1)
+    AAfreq <- codon_df1
+    for (codon in colnames(AAfreq)) {
+      AAfreq[ ,codon] <- AA_df[ ,AAcodons$letterCOde3[grep(codon, AAcodons$codon)]]
+    }
+
+    AAfreq$TauxGC <- tauxGC_whole$GC
+    AAfreq$Region <- "AA"
+  
+  
+    df <- rbind(rel_cdf1,
+                rel_cdf2,
+                AAfreq)
+    
+    # Then plot for each of the codons : 
+    for (codon in colnames(codon_df1)) {
+      
+      print(codon)
+      
+      library(ggplot2)
+      library(ggpubr)
+      p <- ggplot(df, aes(x=TauxGC, y=df[,codon], color = Region))+ 
+      geom_point()+
+      geom_smooth()+
+      ggtitle(paste(codon,"codon frequency against genome GC content"))+
+      ylab(paste(codon,"frequency"))+
+      xlab(paste("genome GC content"))+
+      scale_color_manual(values=c("grey", "darkorange1", "darkorchid1"))+
+      geom_label(
+        label=paste("Encoded AA : ", AAcodons$letterCOde3[grep(codon, AAcodons$codon)]),
+        x=0.55,
+        y=0.14,
+        label.size = 0.35,
+        color = "black")+
+      ylim(0,0.15)
+    
+      print(p)
+      }
+  } else { print("codon_df1, codon_df2 and tauxGC_whole do not seem to share the exact same genome names (same order).")}
+  
+  if(save_as_pdf){ dev.off() }
+}
+```
+
+```{r}
+get64GC(codon_df1 = codon_df_cds,
+        codon_df2 = codon_df_random,
+        lb1 = "CDS",
+        lb2 = "randomized CDS",
+        save_as_pdf = T,
+        title = "64 codons plus AA frequency against genome GC content CDS vs RANDOM")
+```
+
+# Same-x freq
+
+```{r}
+# Return the mean frequency of a given reference set of nucleotidic sequences
+getSeqFreq <- function(codon_count, by){
+  
+  codon_Counts_ref <- codon_count
+
+  
+  if(by == "same_position"){
+  # Transform codon_Counts to a table so that for position 1 of the codon it displays the proportion of A T C and G.
+    
+    library(stringr)
+      meanBasesFractions_ref <- data.frame(A1=rep(as.double(NA),dim( codon_Counts_ref)[1]),C1=rep(as.double(NA),dim( codon_Counts_ref)[1]),G1=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              T1=rep(as.double(NA),dim( codon_Counts_ref)[1]),A2=rep(as.double(NA),dim( codon_Counts_ref)[1]),C2=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              G2=rep(as.double(NA),dim( codon_Counts_ref)[1]),T2=rep(as.double(NA),dim( codon_Counts_ref)[1]),A3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              C3=rep(as.double(NA),dim( codon_Counts_ref)[1]),G3=rep(as.double(NA),dim( codon_Counts_ref)[1]),T3=rep(as.double(NA),dim( codon_Counts_ref)[1]))
+
+    
+    for(pos in c(1,2,3)){
+      for(base in c("A","C","G","T")){
+        
+        codon_givenBase_givenPosition_ref <- substring(colnames(codon_Counts_ref),pos,pos) == base
+
+ 
+          sum_givenBase_givenPosition_ref <- rowSums(t(t(codon_Counts_ref)*codon_givenBase_givenPosition_ref))
+          relFreqBasePos_ref <- sum_givenBase_givenPosition_ref/rowSums(codon_Counts_ref)
+          
+          meanBasesFractions_ref[,paste(base,pos, sep="")] <- relFreqBasePos_ref
+        
+  
+      }
+    }
+     names(meanBasesFractions_ref) <- c("1A","1C","1G","1T",
+              "2A","2C","2G","2T",
+              "3A","3C","3G","3T")
+
+  }
+  
+  
+  
+
+  if(by == "same_base"){
+    # Transform codon_Counts to a table so that for the A base it displays its fraction in first second and third position of the codon.
+    library(stringr)
+    # Mean fraction of each base among the 3 codon position
+      meanBasesFractions_ref <- data.frame(A1=rep(as.double(NA),dim( codon_Counts_ref)[1]),A2=rep(as.double(NA),dim( codon_Counts_ref)[1]),A3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              C1=rep(as.double(NA),dim( codon_Counts_ref)[1]),C2=rep(as.double(NA),dim( codon_Counts_ref)[1]),C3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              G1=rep(as.double(NA),dim( codon_Counts_ref)[1]),G2=rep(as.double(NA),dim( codon_Counts_ref)[1]),G3=rep(as.double(NA),dim( codon_Counts_ref)[1]),
+              T1=rep(as.double(NA),dim( codon_Counts_ref)[1]),T2=rep(as.double(NA),dim( codon_Counts_ref)[1]),T3=rep(as.double(NA),dim( codon_Counts_ref)[1]))
+
+    
+    
+    for (base in c("A","C","G","T")){
+      for (pos in c(1,2,3)){
+        codons_givenBase_ref <- str_count(colnames(codon_Counts_ref), base)
+
+        codon_givenBase_givenPosition_ref <- substring(colnames(codon_Counts_ref),pos,pos) == base
+        
+          
+          sum_givenBase_givenPosition_ref <- rowSums(t(t(codon_Counts_ref)*codon_givenBase_givenPosition_ref))
+        
+          all_givenBase_ref <- rowSums(t(t(codon_Counts_ref)*codons_givenBase_ref))
+          
+          relFreqBasePos_ref <- sum_givenBase_givenPosition_ref/all_givenBase_ref
+          meanBasesFractions_ref[,paste(base,pos, sep="")] <- relFreqBasePos_ref
+        
+      }
+    }
+  }
+  
+  return(meanBasesFractions_ref)
+  
+}
+```
+
+# Codon group freq vs GC content (scatter plot or boxplot)
+
+```{r}
+codonFreqVs_GC <- function(codon_df_cds, codon_df_interG, lb1, lb2, codon_list, title, plot_type = "sp"){
+  
+  # Subset the dataframe with selected codons
+  restricted_df <- codon_df_cds[ ,codon_list]
+
+  list_nb <- rowSums(restricted_df) 
+  total_nb <- rowSums(codon_df_cds)
+  
+  # Get relative frequency
+  list_freq <- list_nb/total_nb
+  
+  df_cds <- data.frame(freq = list_freq, GC = tauxGC_whole$GC, region = lb1)
+  
+ 
+  restricted_df <- codon_df_interG[ ,codon_list]
+
+  list_nb <- rowSums(restricted_df) 
+  total_nb <- rowSums(codon_df_interG)
+  
+  list_freq <- list_nb/total_nb
+  
+  df_interG <- data.frame(freq = list_freq, GC = tauxGC_whole$GC, region = lb2)
+  
+  df <- rbind(df_cds, df_interG)
+  
+  
+  library(ggplot2)
+  library(ggpubr)
+  
+  # If scatter plot : 
+  if(plot_type == "sp"){
+    p <- ggplot(df, aes(x=GC, y=freq, color = region))+ 
+    geom_point()+
+    ggtitle(title)+
+    geom_smooth(method=lm)+
+    stat_cor(method = "spearman")+
+    ylab("frequency")+
+    xlab("genome GC content")+
+    scale_color_manual(name = "Sequence type", values=c("darkorange1", "darkorchid1"))+
+    ylim(0,0.5)
+  }
+
+  # If boxplot : 
+  if(plot_type == "bp"){
+    library(arules)
+    df$GC <- discretize(df$GC, method = "interval", breaks = 10)
+    
+    p <- ggplot(df, aes(x=GC, y=freq, fill = region)) +
+    geom_boxplot()+
+    ggtitle(title)+
+    ylab("frequency")+
+    xlab("genome GC content")+
+    labs(fill="Sequence type")+
+    scale_fill_manual(values=c("darkorange1", "darkorchid1"))+
+    theme(axis.text.x = element_text(angle = 90))
+  }
+
+
+  print(p)
+  
+  return(df)
+}
+```
+
+```{r}
+pdf("hydrophobic codon frenquency vs GC content.pdf")
+
+title <- "All hydrophobic codons freq vs GC content"
+HPB_AA <-c("V","I","L","M","Y","F","W")
+HDB_codons <- AAcodons[AAcodons$letterCode1 %in% HPB_AA, "codon"]
+
+test <- codonFreqVs_GC(codon_df_cds, codon_df_random, lb1 = "CDS", lb2 = "randomized CDS", HDB_codons, title, plot_type = "bp")
+
+title <- "NTN (T2) hydrophobic codons freq vs GC content"
+T2_AA <-c("V","I","L","M","F")
+T2_codons <- AAcodons[AAcodons$letterCode1 %in% T2_AA, "codon"]
+
+test2 <- codonFreqVs_GC(codon_df_cds, codon_df_random, lb1 = "CDS", lb2 = "randomized CDS", T2_codons, title)
+
+title <- "NON-XTX (NON-T2) hydrophobic codons freq vs GC content"
+NONT2_AA <-c("Y","W")
+NONT2_codons <- AAcodons[AAcodons$letterCode1 %in% NONT2_AA, "codon"]
+
+test3 <- codonFreqVs_GC(codon_df_cds, codon_df_random, lb1 = "CDS", lb2 = "randomized CDS", NONT2_codons, title)
+
+dev.off()
+```
+
+```{r}
+title <- "NTN (T2) hydrophobic codons freq vs GC content"
+T2_AA <-c("V","I","L","M","F")
+T2_codons <- AAcodons[AAcodons$letterCode1 %in% T2_AA, "codon"]
+
+test2 <- codonFreqVs_GC(codon_df_cds_ALL, codon_df_random_ALL, lb1 = "CDS", lb2 = "randomized CDS", T2_codons, title)
+```
+
+# Codon freq correlation
+
+```{r}
+# WARNING THIS IS A SPECIAL CODIONS ORDERING FOR PLOTTING !
+codon_list <- c()
+for (base1 in c('T','C','A','G')){
+  for (base2 in c('T','C','A','G')){
+    for (base3 in c('T','C','A','G')){
+      codon_list <- c(codon_list, paste(base1, base3, base2, sep=""))
+    }
+  }
+}
+
+plots <- list()
+
+i=0
+
+for (codon in codon_list){
+  
+  i= i+1
+  
+  codon_freq_cds <- codon_df_cds[ ,codon]/rowSums(codon_df_cds)
+  codon_freq_random <- codon_df_random[ ,codon]/rowSums(codon_df_random)
+  
+  max_val <- max(max(codon_freq_cds),max(codon_freq_random))
+  
+    
+  df <- data.frame(genome = row.names(codon_df_cds),
+                   frequency_in_CDS = codon_freq_cds,
+                   reference_frequency = codon_freq_random,
+                   GC_content = tauxGC_whole$GC)
+    
+    title <- paste(codon, AAcodons$letterCOde3[AAcodons$codon == codon], sep = " : ")
+    library(ggplot2)
+    library(ggpubr)
+    p <- ggplot(df, aes(x=reference_frequency, 
+                        y=frequency_in_CDS,
+                        color = GC_content))+ 
+      geom_point()+
+      # geom_smooth(method=lm, aes(group=1))+
+      ggtitle(title)+
+      # stat_cor(method = "pearson", label.x = 0, label.y = 1)+
+      # geom_label(
+      #   label=paste("Slope : ",lm(formula = frequency_in_CDS~reference_frequency,
+      #                            data = df)$coefficients[2]),
+      #   x=0.6,
+      #   y=1.005, # Rectangle size around label
+      #   label.size = 0.35,
+      #   color = "black")+
+      geom_abline(intercept = 0, slope = 1, color="black", size=0.5)+
+      ylim(c(0,max_val))+
+      xlim(c(0,max_val))+
+      labs(fill = "GC content")+
+      xlab("random. CDS") + ylab("CDS")+
+      scale_colour_gradient(low="grey95", high="black")+
+      theme_minimal()
+    
+    plots[[i]] <- p
+    
+}
+
+p_no_legend <- lapply(plots, function(x) x + theme(legend.position = "none"))
+legend <- cowplot::get_legend(plots[[1]] + theme(legend.position = "bottom"))
+
+title <- cowplot::ggdraw() + cowplot::draw_label("Mean codons frequencies of archeal genomes", fontface = "bold")
+
+pdf("64 codon freq correlations.pdf",width = 6.5)
+p_grid <- cowplot::plot_grid(plotlist = p_no_legend[1:16])
+cowplot::plot_grid(title, p_grid, legend, ncol = 1, rel_heights = c(0.1, 1, 0.2))
+p_grid <- cowplot::plot_grid(plotlist = p_no_legend[17:32])
+cowplot::plot_grid(title, p_grid, legend, ncol = 1, rel_heights = c(0.1, 1, 0.2))
+p_grid <- cowplot::plot_grid(plotlist = p_no_legend[33:48])
+cowplot::plot_grid(title, p_grid, legend, ncol = 1, rel_heights = c(0.1, 1, 0.2))
+p_grid <- cowplot::plot_grid(plotlist = p_no_legend[49:64])
+cowplot::plot_grid(title, p_grid, legend, ncol = 1, rel_heights = c(0.1, 1, 0.2))
+dev.off()
+```
+
+```{r}
+# Return the mean frequency of a given reference set of nucleotidic sequences
+get_NNX_Freq <- function(codon_count){
+  
+  # Retrieve the first two letters of codon_count colnames
+  NNNs <- colnames(codon_df_cds)
+  NNX_colnames <- substr(NNNs ,start = 1,stop = 2)
+  
+  
+  # Generate all possible NNX codons first two letters
+  NNXs <- c()
+  for (base1 in c("T","C","A","G")) {
+    for (base2 in c("T","C","A","G")){
+      NNX <- paste(base1, base2, sep="")
+      NNXs <- c(NNXs, NNX)
+    }
+  }
+  
+  # Create an empty dataframe to return
+  NNX_count <- data.frame(matrix(ncol = 16, nrow = nrow(codon_df_cds)))
+  colnames(NNX_count) <- NNXs
+  
+  
+  # Compute codon_count row sums
+  rowsums <- rowSums(codon_count)
+  
+  for (NNX in NNXs){
+    col_tosum <- grep(NNX, NNX_colnames)
+    NNX_count[ ,NNX] <- rowSums(codon_count[ ,col_tosum])/rowsums
+    
+  }
+  
+  colnames(NNX_count) <- paste(colnames(NNX_count),"N", sep="")
+
+  return(NNX_count)
+}
+```
+
+# XYN correlation
+
+```{r}
+plots <- list()
+
+
+NNX_cds <- get_NNX_Freq(codon_df_cds)
+NNX_random <- get_NNX_Freq(codon_df_random)
+
+i=0
+
+for (codon in colnames(NNX_cds)){
+  
+  i= i+1
+  
+  codon_freq_cds <- NNX_cds[ ,codon]/rowSums(NNX_cds)
+  codon_freq_random <- NNX_random[ ,codon]/rowSums(NNX_random)
+  
+  max_val <- max(max(codon_freq_cds),max(codon_freq_random))
+  
+    
+  df <- data.frame(frequency_in_CDS = codon_freq_cds,
+                   reference_frequency = codon_freq_random,
+                   GC_content = tauxGC_whole$GC)
+    
+    title <- codon
+    library(ggplot2)
+    library(ggpubr)
+    p <- ggplot(df, aes(x=reference_frequency, y=frequency_in_CDS,color = GC_content))+ 
+      geom_point()+
+      # geom_smooth(method=lm, aes(group=1))+
+      ggtitle(title)+
+      stat_cor(method = "pearson", label.x = 0, label.y = 1)+
+      geom_label(
+        label=paste("Slope : ",lm(formula = frequency_in_CDS~reference_frequency,
+                                 data = df)$coefficients[2]),
+        x=0.6,
+        y=1.005, # Rectangle size around label
+        label.size = 0.35,
+        color = "black")+#+
+      geom_abline(intercept = 0, slope = 1, color="black", size=0.5)+
+      ylim(c(0,max_val))+
+      xlim(c(0,max_val))+
+      xlab("random. CDS") + ylab("CDS")+
+      scale_colour_gradient(low="grey95", high="black")+
+      theme_minimal()
+
+    
+    plots[[i]] <- p
+    
+}
+
+p_no_legend <- lapply(plots, function(x) x + theme(legend.position = "none"))
+legend <- cowplot::get_legend(plots[[1]] + theme(legend.position = "bottom"))
+
+title <- cowplot::ggdraw() + cowplot::draw_label("Mean XYN frequencies of archeal genomes", fontface = "bold")
+
+pdf("16 NNX freq correlations.pdf",width = 6.5)
+p_grid <- cowplot::plot_grid(plotlist = p_no_legend)
+cowplot::plot_grid(title, p_grid, legend, ncol = 1, rel_heights = c(0.1, 1, 0.2))
+dev.off()
+```
+
+# Same-X correlation
+
+```{r}
+by = "same_base"
+# by = "same_position"
+  
+plots <- list()
+
+i = 0
+
+dfposition_cds <- getSeqFreq(codon_df_cds, by)
+dfposition_interG <- getSeqFreq(codon_df_random, by)
+
+if(by == "same_position"){
+  basesNposes <- c("1T","1C","1A","1G", "2T","2C","2A","2G", "3T","3C","3A","3G")
+}
+if(by == "same_base"){
+  basesNposes <- c("T1", "C1", "A1", "G1","T2", "C2", "A2", "G2","T3", "C3", "A3", "G3")
+}
+  
+for (given_baseNpos in basesNposes){
+  
+  i= i+1
+  
+  taux_cds <- dfposition_cds[ ,given_baseNpos]
+  taux_interG <- dfposition_interG[ ,given_baseNpos]
+  
+  max_val <- max(max(taux_cds),max(taux_interG))
+  
+  mean_cds <- mean(taux_cds)
+  mean_interG <- mean(taux_interG)
+  
+  print(identical(as.factor(rownames(codon_df_cds)), tauxGC_whole$genome))
+  
+  df <- data.frame(genome = rownames(codon_df_cds),
+                   frequency_in_CDS = taux_cds,
+                   reference_frequency = taux_interG,
+                   GC_content = tauxGC_whole$GC)
+  
+  title <- given_baseNpos
+  library(ggplot2)
+  library(ggpubr)
+  p <- ggplot(df, aes(x=reference_frequency, y=frequency_in_CDS, color = GC_content))+ 
+    geom_point()+
+    ggtitle(title)+
+    ylim(c(0,max_val))+
+    xlim(c(0,max_val))+
+    geom_abline(intercept = 0, slope = 1, color="black", size=0.5)+
+    labs(fill = "GC content")+
+    xlab("random. CDS") + ylab("CDS")+
+    scale_colour_gradient(low="grey95", high="black")+
+    theme_minimal()
+  
+    plots[[i]] <- p
+    
+    }
+
+  p_no_legend <- lapply(plots, function(x) x + theme(legend.position = "none"))
+  legend <- cowplot::get_legend(plots[[1]] + theme(legend.position = "bottom"))
+  
+  title <- cowplot::ggdraw() + cowplot::draw_label("Mean of same base codon frequencies of archeal genomes", fontface = "bold")
+  
+  pdf("12 same_base freq correlations.pdf")
+  p_grid <- cowplot::plot_grid(plotlist = p_no_legend)
+  cowplot::plot_grid(title, p_grid, legend, ncol = 1, rel_heights = c(0.1, 1, 0.2))
+  dev.off()
+```
+
+# Heatmap CDS - randomCDS
+
+```{r}
+# get relative frequencies
+cc_cds <- as.data.frame(t(scale(t(codon_df_cds), 
+                                center = FALSE,
+                                scale = colSums(t(codon_df_cds)))))
+cc_random <- as.data.frame(t(scale(t(codon_df_random), 
+                                   center = FALSE, 
+                                   scale = colSums(t(codon_df_random)))))
+
+
+means_cds <- colMeans(cc_cds)
+means_random <- colMeans(cc_random)
+meandiffs <- (means_cds - means_random)/means_cds
+
+# Get the name of each codon associated to each value
+names(meandiffs) <- colnames(cc_cds)
+
+codon_list <- c()
+for (base1 in c('T','C','A','G')){
+  for (base2 in c('T','C','A','G')){
+    for (base3 in c('T','C','A','G')){
+      codon_list <- c(codon_list, paste(base1, base2, base3, sep=""))
+    }
+  }
+}
+
+# Build a text map to put on the top of the heatmap
+codon_list_with_AA <- c()
+for (codon in codon_list){
+  codon_list_with_AA <- c(codon_list_with_AA, (paste(codon, AAcodons$letterCOde3[AAcodons$codon == codon], sep = " : ")))
+}
+mat1 <- matrix(codon_list_with_AA[1:16], nrow = 4)
+mat2 <- matrix(codon_list_with_AA[17:32], nrow = 4)
+mat3 <- matrix(codon_list_with_AA[33:48], nrow = 4)
+mat4 <- matrix(codon_list_with_AA[49:64], nrow = 4)
+codonsmatrix <- rbind(mat1,
+                          mat2,
+                          mat3,
+                          mat4)
+
+# Build a heatmap
+meandiffs <- meandiffs[order(match(names(meandiffs),codon_list))]
+meandiffs <- exp(meandiffs)
+
+mat1 <- matrix(meandiffs[1:16], nrow = 4)
+mat2 <- matrix(meandiffs[17:32], nrow = 4)
+mat3 <- matrix(meandiffs[33:48], nrow = 4)
+mat4 <- matrix(meandiffs[49:64], nrow = 4)
+randomDiff_table <- rbind(mat1,
+                          mat2,
+                          mat3,
+                          mat4)
+
+# load package
+library(pheatmap)
+pheatmap(randomDiff_table,cluster_rows=FALSE, cluster_cols=FALSE, display_numbers = codonsmatrix)
+```
+
+# Charge ratio
+
+```{r}
+# Look at the distribution of mean charge ratio (CDS vs random)
+lb1 <- "lb1"
+lb2 <- "lb2"
+color1 <- "darkorange1"
+color2 <- "darkorchid1"
+
+AA_cds <- getAAfreq(codon_df_cds)
+AA_random <- getAAfreq(codon_df_random)
+
+pos_cds <- rowSums(AA_cds[ ,c("Lys","Arg")])
+pos_random <- rowSums(AA_random[ ,c("Lys","Arg")])
+
+neg_cds <- rowSums(AA_cds[ ,c("Asp","Glu")])
+neg_random <- rowSums(AA_random[ ,c("Asp","Glu")])
+
+pos <- c(pos_cds, pos_random)
+neg <- c(neg_cds, neg_random)
+ratio <- pos/neg
+
+df <- data.frame(ratio)
+df$lb <- c(rep(lb1,nrow(AA_cds)), rep(lb2,nrow(AA_random)))
+
+library(ggplot2)
+p <- ggplot(data = df, aes(y=ratio))+ 
+  geom_boxplot(aes(fill=lb))+
+  scale_fill_manual(values=c(color1, color2), breaks = c(lb1, lb2))+
+  ggtitle(paste(lb1,"vs",lb2))
+  
+
+print(p)
+```
+
+# Versus boxplot
+
+```{r}
+versusBoxplot <- function(codon_count1, codon_count2, lb1, lb2, by, title){
+  
+  if (by == "NNX"){
+    df1 <- get_NNX_Freq(codon_count1)
+    df2 <- get_NNX_Freq(codon_count2)
+  } else {
+    df1 <- getSeqFreq(codon_count1, by)
+    df2 <- getSeqFreq(codon_count2, by)
+  }
+
+  df1$lb <- lb1
+  df2$lb <- lb2
+  
+  df <- rbind(df1, df2)
+  
+  if(by == "same_base"){
+    df <- df[ ,c("A1","A2","A3",
+              "C1","C2","C3",
+              "G1","G2","G3",
+              "T1","T2","T3","lb")]
+  }
+  
+  if(by == "same_position"){
+    df <- df[ ,c("1T","1C","1A","1G","2T","2C","2A","2G","3T","3C","3A","3G","lb")]
+  }
+  
+  library(reshape2)
+  df <- melt(df)
+  
+
+  
+  library(ggplot2)
+  p <- ggplot(data = df, aes(x=variable, y=value))+ 
+    geom_boxplot(aes(fill=lb))+
+    # scale_fill_manual(values=c(color1, color2), breaks = c(lb1, lb2))+
+    ggtitle(title)+
+    labs(fill = "Sequence type")+
+    xlab("codon group") + ylab("mean frequency")+
+    # ylim(c(0,0.12))+
+    scale_fill_grey(start = 0.5, end = 0.9)+
+    theme_minimal()+
+    theme(legend.position="bottom")
+  
+    
+  
+  print(p)
+  
+  return(df)
+}
+```
+
+```{r}
+title <- "XYN codon groups distribution in archeal genomes"
+
+pdf(paste(title,".pdf",sep=""))
+ok <- versusBoxplot(codon_count1 = codon_df_cds,
+                    codon_count2 = codon_df_random,
+                    lb1 = "CDS",
+                    lb2 = "randomized CDS",
+                    by = "NNX",
+                    title = title)
+dev.off()
+
+title <- "Boxplot CDS vs IGORF same position"
+pdf(paste(title,".pdf",sep=""))
+ok <- versusBoxplot(codon_count1 = codon_df_cds,
+                    codon_count2 = codon_df_random,
+              "CDS",
+              "IGORF",
+              by = "same_position",
+              title = title)
+dev.off()
+
+title <- "Boxplot CDS vs IGORF same base"
+
+pdf(paste(title,".pdf",sep=""))
+ok <- versusBoxplot(codon_count1 = codon_df_cds,
+                    codon_count2 = codon_df_interG,
+              "CDS",
+              "IGORF",
+              by = "same_base")
+dev.off()
+
+title <- "Same position codon groups distribution in archeal genomes"
+pdf(paste(title,".pdf",sep=""))
+ok <- versusBoxplot(codon_count1 = codon_df_cds,
+                    codon_count2 = codon_df_random,
+                    lb1 = "CDS",
+                    lb2 = "randomized CDS",
+                    by = "same_position",
+                    title = title)
+dev.off()
+
+title <- "Same base codon groups distribution in archeal genomes"
+
+pdf(paste(title,".pdf",sep=""))
+ok <- versusBoxplot(codon_count1 = codon_df_cds,
+                    codon_count2 = codon_df_random,
+                    lb1 = "CDS",
+                    lb2 = "randomized",
+                    by = "same_base",
+                    title = title)
+dev.off()
+```
+
+# NTN codons (all seq) vs binned GC
+
+```{r}
+binned_GC_Plot <- function(codon_df1, codon_df2, title){
+   
+  NTN_codons <- colnames(codon_df1)[grep(".T.", colnames(codon_df1))]
+
+  print('Computing NTN freq 1...')
+  NTN_freq1 <- rowSums(codon_df1[ ,NTN_codons])/rowSums(codon_df1[ ,-c(65,66)])
+  print('Done.')
+  
+  i=0
+  GC1 <- c()
+  for (genome in unique(codon_df1$Genome)){
+    i = i+1
+    print(i)
+    print(genome)
+    
+    GC1[codon_df1$Genome == genome] <- tauxGC_whole$GC[tauxGC_whole$genome == genome]
+  
+  }
+  
+  
+  print('Computing NTN freq 2...')
+  NTN_freq2 <- rowSums(codon_df2[ ,NTN_codons])/rowSums(codon_df2[ ,-c(65,66)])
+  print('Done.')
+
+  i=0
+  GC2 <- c()
+  for (genome in unique(codon_df2$Genome)){
+    i = i+1
+    print(i)
+    
+    GC2[codon_df2$Genome == genome] <- tauxGC_whole$GC[tauxGC_whole$genome == genome]
+  
+  }
+
+  
+  NTN_freq <- c(NTN_freq1, NTN_freq2)
+  GC <- c(GC1, GC2)
+  Region <- c(rep("CDS",nrow(codon_df1)), rep("RANDOM", nrow(codon_df2)))
+  
+  df <- data.frame(NTN_freq, GC)
+  
+
+  library(arules)
+  df$TauxGC <- discretize(df$GC, method = "interval", breaks = 10)
+
+   
+  library(ggplot2)
+  p <- ggplot(df, aes(x=TauxGC, y=NTN_freq, fill = Region)) +
+    geom_boxplot()+
+    ggtitle(title)+
+    # scale_fill_manual(values=c("darkorange1", "darkorchid1"))+
+    ylab("NTN codons frequency")+
+    xlab("genome GC content")+
+    labs(fill = "Sequence type")+
+    ylim(c(0,0.5))+
+    scale_fill_grey(start = 0.5, end = 0.9)+
+    theme_minimal()+
+    theme(legend.position="bottom")+
+    theme(axis.text.x = element_text(angle = 90))
+    
+    print(p)
+    
+    pdf(file = paste(title,".pdf"))
+    print(p)
+    dev.off()
+  
+}
+pdf("Distribution NTN vs binned GC")
+output <- binned_GC_Plot(codon_df_cds_ALL, codon_df_random_ALL,
+                       title = "Distribution of NTN codons frequency against genomes GC content")
+dev.off()
+```
+
+# HCA score
+
+```{r}
+# this function retrieves HCA score, mean size and number of clusters and linkers for each sequences, which were computed in the dedicated python script.
+get_HCA_data <- function(dir_path){
+
+  big_genomes <- c()
+  big_GC <- c()
+  big_hca <- c()
+  big_cluster_nb <- c()
+  big_cluster_mean <- c()
+  big_linker_nb <- c()
+  big_linker_mean <- c()
+  
+  files <- list.files(dir_path)
+  
+  i = 0
+  
+  for (file in files){
+    
+    i = i+1
+    print(i)
+    # For a given file :
+    lines <- readLines(paste(dir_path,file,sep=""))
+    
+    headers <- lines[grep(">", lines)]
+    
+    genome <- sub("_coding.*","",file)
+    genomes <- rep(genome,length(headers))
+    
+    GCs <- rep(tauxGC_whole$GC[grep(genome, tauxGC_whole$genome)],length(headers))
+    
+    HCA_scores  <- as.numeric(gsub(pattern = ".*HCA_score = | clu_nb = .*",
+                        replacement = "",
+                        x = headers))
+    cluster_nbs  <- as.numeric(gsub(pattern = ".*clu_nb = | clu_mean = .*",
+                        replacement = "",
+                        x = headers))
+    cluster_means <- as.numeric(gsub(pattern = ".*clu_mean = | link_nb = .*",
+                        replacement = "",
+                        x = headers))
+    
+    linker_nbs  <- as.numeric(gsub(pattern = ".*link_nb = | link_mean = .*",
+                        replacement = "",
+                        x = headers))
+    
+    linker_means <- as.numeric(gsub(pattern = ".*link_mean = ",
+                        replacement = "",
+                        x = headers))
+    
+    big_genomes <- c(big_genomes, genomes)
+    big_GC <- c(big_GC, GCs)
+    big_hca <- c(big_hca, HCA_scores)
+    big_cluster_nb <- c(big_cluster_nb, cluster_nbs)
+    big_cluster_mean <- c(big_cluster_mean, cluster_means)
+    big_linker_nb <- c(big_linker_nb, linker_nbs)
+    big_linker_mean <- c(big_linker_mean, linker_means)
+  }
+  
+  df <- data.frame(Genome = big_genomes, GC = big_GC, HCA_score = big_hca, cluster_nb = big_cluster_nb, cluster_mean = big_cluster_mean, linker_nb = big_linker_nb, linker_mean = big_linker_mean)
+  
+  return(df)
+}
+
+HCA_data_coding <- get_HCA_data(dir_path = "../Archaea_Data/HCA_clustNlink_coding/")
+HCA_data_random <- get_HCA_data(dir_path = "../Archaea_Data/HCA_clustNlink_randomCDS/")
+```
+
+```{r}
+binned_GC_Plot <- function(df1, df2, variable, ylab, ylim = 0, title){
+   
+  variable1 <- df1[ ,variable]
+  variable2 <- df2[ ,variable]
+  variable <- c(variable1,
+                variable2)
+  
+  GC <- c(df1$GC, 
+          df2$GC)
+  
+  Region <- c(rep("CDS",nrow(df1)), 
+              rep("randomized CDS", nrow(df2)))
+  
+  df <- data.frame(variable, GC, Region)
+  
+  library(arules)
+  df$TauxGC <- discretize(df$GC, method = "interval", breaks = 10)
+
+  library(ggplot2)
+  
+  p <- ggplot(df, aes(x=TauxGC, y=variable, fill = Region)) +
+    geom_boxplot()+
+    ggtitle(title)+
+    # scale_fill_manual(values=c("darkorange1", "darkorchid1"))+
+    labs(fill = "Sequence type")+
+    xlab("genome GC content")+
+    ylab(ylab)+
+    ylim(ylim)+
+    scale_fill_grey(start = 0.5, end = 0.9)+
+    theme_minimal()+
+    theme(legend.position="bottom")+
+    theme(axis.text.x = element_text(angle = 90))
+    
+    
+    
+  print(p)
+  
+  pdf(file = paste(title,".pdf"))
+  print(p)
+  dev.off()
+    
+
+  return(df)
+}
+```
+
+```{r}
+pdf("Distribution HCA vs binned GC.pdf")
+output <- binned_GC_Plot(HCA_data_coding,
+                         HCA_data_random,
+                         "cluster_mean",
+                         "mean cluster length",
+                         ylim = c(0,15),
+                        title = "Distribution of mean hydrophobic cluster length vs binned genome GC content")#
+output <- binned_GC_Plot(HCA_data_coding,
+                         HCA_data_random,
+                         "cluster_nb",
+                         "number of clusters",
+                         ylim = c(0,15),
+                        title = "Distribution of the number of hydrophobic clusters vs binned genome GC content")
+
+output <- binned_GC_Plot(HCA_data_coding,
+                         HCA_data_random,
+                         "HCA_score",
+                         ylab = "HCA score",
+                         ylim =c(-10,10),
+                         title = "Distribution of sequences HCA score against genome GC content")
+dev.off()
+```
