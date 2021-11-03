@@ -1,5 +1,5 @@
 ---
-title: "Acrhaea"
+title: "Archaea"
 author: "Paul Roginski"
 date: "23/04/2021"
 output: html_document
